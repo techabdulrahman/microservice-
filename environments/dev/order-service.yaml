@@ -1,0 +1,3 @@
+services:
+  order-service:
+    image: "asia-south1-docker.pkg.dev/abdulproject-510307/ecommerce-repo/user-service@sha256:18cd40c1dcb8cba9d03347845866342ef00f31c24b5eca5307335a8126893ac2"
