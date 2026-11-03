@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ecommerce-demo
+description: Colorful Market learning storefront and demo APIs
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,131 @@
+name: Promote image to GKE
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        required: true
+        options:
+          - dev
+          - staging
+          - production
+      service:
+        description: Service whose image should be promoted
+        type: choice
+        required: true
+        options:
+          - frontend
+          - api-gateway
+          - product-service
+          - order-service
+      image_reference:
+        description: Immutable Artifact Registry image reference ending in @sha256:<64 hex characters>
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-${{ inputs.environment }}-${{ inputs.service }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote image through GitOps
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Require the main branch
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from the main branch."
+            exit 1
+          fi
+
+      - name: Check out deployment configuration
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate Artifact Registry image reference
+        env:
+          IMAGE_REFERENCE: ${{ inputs.image_reference }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          image = os.environ["IMAGE_REFERENCE"]
+          pattern = (
+              r"^asia-south1-docker\.pkg\.dev/"
+              r"abdulproject-510307/[^/\s]+/[^@\s]+"
+              r"@sha256:[0-9a-f]{64}$"
+          )
+          if re.fullmatch(pattern, image) is None:
+              sys.exit(
+                  "Image must be an immutable Artifact Registry digest in "
+                  "asia-south1 for project abdulproject-510307, for example "
+                  "asia-south1-docker.pkg.dev/abdulproject-510307/REPOSITORY/"
+                  "IMAGE@sha256:<64 lowercase hex characters>."
+              )
+          PY
+
+      - name: Write Helm image override
+        env:
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+          IMAGE_REFERENCE: ${{ inputs.image_reference }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = (
+              Path("environments")
+              / os.environ["DEPLOY_ENVIRONMENT"]
+              / f'{os.environ["SERVICE"]}.yaml'
+          )
+          path.parent.mkdir(parents=True, exist_ok=True)
+          image = json.dumps(os.environ["IMAGE_REFERENCE"])
+          # Matches helm/ecommerce-demo/values.yaml: services.<name>.image
+          path.write_text(
+              f'services:\n  {os.environ["SERVICE"]}:\n    image: {image}\n',
+              encoding="utf-8",
+          )
+          print(f"Updated {path}")
+          PY
+
+      - name: Commit desired image version
+        env:
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "environments/${DEPLOY_ENVIRONMENT}/${SERVICE}.yaml"
+          if git diff --cached --quiet; then
+            echo "The requested image is already the desired version."
+            exit 0
+          fi
+          git commit -m "Deploy ${SERVICE} to ${DEPLOY_ENVIRONMENT}"
+          git push origin main
+
+      - name: Report GitOps handoff
+        env:
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+          IMAGE_REFERENCE: ${{ inputs.image_reference }}
+        run: |
+          {
+            echo "### Deployment request recorded"
+            echo ""
+            echo "- Environment: \`${DEPLOY_ENVIRONMENT}\`"
+            echo "- Service: \`${SERVICE}\`"
+            echo "- Desired image: \`${IMAGE_REFERENCE}\`"
+            echo "- Argo CD must watch this repository and sync the matching Helm chart."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,64 @@
+services:
+  product-service:
+    build:
+      context: ../services/product-service
+    environment:
+      PYTHONUNBUFFERED: "1"
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  order-service:
+    build:
+      context: ../services/order-service
+    environment:
+      PRODUCT_SERVICE_URL: http://product-service:8000
+      PYTHONUNBUFFERED: "1"
+    expose:
+      - "8000"
+    depends_on:
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: ../api-gateway
+    environment:
+      PRODUCT_SERVICE_URL: http://product-service:8000
+      ORDER_SERVICE_URL: http://order-service:8000
+      PYTHONUNBUFFERED: "1"
+    expose:
+      - "8000"
+    depends_on:
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+
+  frontend:
+    build:
+      context: ../frontend
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

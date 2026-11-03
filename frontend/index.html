@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#fffaf4">
+    <meta name="description" content="Colorful Market - lovely little finds for everyday living.">
+    <title>Colorful Market — lovely little finds</title>
+    <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="announcement">A little color goes a long way <span aria-hidden="true">✳</span> Demo shop — no real payments</div>
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="Colorful Market home">
+        <span class="brand-mark" aria-hidden="true">c</span>
+        <span>colorful<span class="brand-light">market</span></span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#shop">Shop all</a>
+        <a href="#story">Our little story</a>
+      </nav>
+      <button class="cart-button" id="cart-open" type="button" aria-label="Open shopping bag">
+        <span aria-hidden="true">Bag</span><span class="bag-icon" aria-hidden="true">↗</span>
+        <span class="cart-count" id="cart-count">0</span>
+      </button>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="sparkle" aria-hidden="true">✳</span> FIND YOUR EVERYDAY HAPPY</div>
+          <h1 id="hero-title">Good things.<br><span>Great color.</span></h1>
+          <p>Thoughtful little finds for brighter mornings, cozier corners, and wherever the day takes you.</p>
+          <a class="primary-button" href="#shop">Find your favorite <span aria-hidden="true">↘</span></a>
+          <div class="hero-note"><span class="avatar-stack" aria-hidden="true"><i>J</i><i>A</i><i>M</i></span> Little joys, picked with love</div>
+        </div>
+        <div class="hero-art" aria-label="Illustration of colorful everyday essentials">
+          <div class="hero-sun"></div><div class="hero-blob"></div>
+          <div class="hero-sticker sticker-top">made for<br>good days <span>✳</span></div>
+          <img class="hero-product hero-mug" src="/images/mug.svg" alt="">
+          <img class="hero-product hero-plant" src="/images/plant.svg" alt="">
+          <img class="hero-product hero-lamp" src="/images/lamp.svg" alt="">
+          <div class="hero-sticker sticker-bottom"><span>✦</span> little things<br>big feeling</div>
+          <div class="hero-doodle" aria-hidden="true">〰</div>
+        </div>
+        <div class="hero-footnote"><span>01</span> / EVERYDAY OBJECTS, EXTRAORDINARY COLOR</div>
+      </section>
+
+      <section class="ticker" aria-label="Store values">
+        <span>GOOD MOOD GOODS</span><i>✳</i><span>MADE FOR YOUR EVERYDAY</span><i>✳</i>
+        <span>COLOR OUTSIDE THE LINES</span><i>✳</i><span>GOOD MOOD GOODS</span>
+      </section>
+
+      <section class="shop-section" id="shop">
+        <div class="section-heading">
+          <div><div class="eyebrow">THE GOOD STUFF</div><h2>Small things,<br class="mobile-break"> <em>big smiles.</em></h2></div>
+          <p>Useful, lovely, and a little unexpected.<br>Pick your next everyday favorite.</p>
+        </div>
+        <div class="category-row" id="categories" aria-label="Filter products"></div>
+        <div class="product-grid" id="product-grid" aria-live="polite">
+          <div class="loading-card">Finding the good stuff…</div>
+        </div>
+      </section>
+
+      <section class="story-section" id="story">
+        <div class="story-art">
+          <div class="story-circle"><span>GOOD<br>THINGS<br>LIVE HERE</span><b>✳</b></div>
+          <img src="/images/bottle.svg" alt="" class="story-bottle">
+          <img src="/images/headphones.svg" alt="" class="story-headphones">
+        </div>
+        <div class="story-copy">
+          <div class="eyebrow">A NOTE FROM US</div>
+          <h2>Life’s too short<br>for <em>beige.</em></h2>
+          <p>We believe the things you use every day should make you feel something. A little delight, a favorite shade, a tiny reminder to enjoy the ordinary.</p>
+          <a href="#shop" class="text-link">A little more color, please <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
+      <section class="newsletter">
+        <div class="newsletter-sparkle" aria-hidden="true">✳</div>
+        <div><div class="eyebrow">A BRIGHT SPOT IN YOUR INBOX</div><h2>Good news, <em>occasionally.</em></h2>
+          <p>This demo newsletter is just for looks—no email is collected.</p></div>
+        <span class="newsletter-heart" aria-hidden="true">♥</span>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand footer-brand" href="#"><span class="brand-mark">c</span><span>colorful<span class="brand-light">market</span></span></a>
+      <span>Made for demo days <span aria-hidden="true">✳</span> No real checkout or payments</span>
+      <a href="#shop">Back to the good stuff ↑</a>
+    </footer>
+
+    <div class="cart-backdrop" id="cart-backdrop" hidden></div>
+    <aside class="cart-drawer" id="cart-drawer" aria-label="Shopping bag" aria-hidden="true">
+      <div class="cart-header"><div><div class="eyebrow">YOUR LITTLE FINDS</div><h2>Your bag <span id="drawer-count">(0)</span></h2></div>
+        <button id="cart-close" class="icon-button" aria-label="Close shopping bag" type="button">×</button></div>
+      <div class="cart-items" id="cart-items"></div>
+      <div class="cart-footer">
+        <div class="cart-total"><span>Subtotal</span><strong id="cart-total">$0.00</strong></div>
+        <label class="name-label" for="customer-name">Your first name</label>
+        <input id="customer-name" maxlength="80" placeholder="e.g. Alex" autocomplete="given-name">
+        <button id="checkout-button" class="primary-button checkout-button" type="button">Place demo order <span aria-hidden="true">↗</span></button>
+        <p class="demo-note">Demo only. No payment is taken and your order clears when the services restart.</p>
+      </div>
+    </aside>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
