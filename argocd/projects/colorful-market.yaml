@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: colorful-market
+  namespace: argocd
+spec:
+  description: Colorful Market application in the ecommerce namespace
+  sourceRepos:
+    - https://github.com/techabdulrahman/microservice-.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ecommerce
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount

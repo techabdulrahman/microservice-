@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: colorful-market
+  namespace: argocd
+spec:
+  project: colorful-market
+  sources:
+    - repoURL: https://github.com/techabdulrahman/microservice-.git
+      targetRevision: main
+      path: helm/ecommerce-demo
+      helm:
+        releaseName: colorful-market
+        valueFiles:
+          - $values/environments/dev/frontend.yaml
+          - $values/environments/dev/api-gateway.yaml
+          - $values/environments/dev/product-service.yaml
+          - $values/environments/dev/order-service.yaml
+    - repoURL: https://github.com/techabdulrahman/microservice-.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ecommerce
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

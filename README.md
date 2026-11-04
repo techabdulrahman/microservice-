@@ -75,55 +75,113 @@ Run the unit tests with:
 python -m pytest tests
 ```
 
-## Deploy the private demo to GKE
+## Deploy the private demo with GitOps
 
-The **Build and deploy application to GKE** GitHub Actions workflow runs
-automatically when changes to the application, Helm chart, tests, or workflow
-are pushed to `main`. It runs the tests, builds and publishes the four images
-to Artifact Registry using the commit SHA as the image tag, and upgrades the
-Helm release in the existing `ecommerce` namespace. It can also be started
-manually from **Actions → Build and deploy application to GKE → Run workflow**
-on `main`.
+GitHub Actions builds and publishes the four application images, then commits
+their immutable Artifact Registry digests to `environments/dev/`. Argo CD
+watches the `main` branch and synchronizes the Helm chart from that Git state
+to the existing GKE cluster. GitHub Actions does not apply the application
+Helm release directly.
 
-Before using it:
+### One-time prerequisites
 
-1. Make sure the GKE cluster `ecommerce-learning` and the Artifact Registry
-   repository `ecommerce-repo` exist in project `abdulproject-510307`, region
-   `asia-south1`.
-2. Configure Workload Identity Federation for this GitHub repository and a
-   dedicated Google service account. Restrict the identity provider to this
-   repository and the `gke-bootstrap` GitHub environment. Add the environment
-   secrets `GCP_WORKLOAD_IDENTITY_PROVIDER` (full provider resource name) and
-   `GCP_SERVICE_ACCOUNT` (service-account email). Do not use a long-lived
-   service-account key.
-3. Grant that service account `roles/artifactregistry.writer` and
-   `roles/container.developer` in the project. It needs permission to push
-   images and deploy namespaced workloads.
-4. Ensure the GKE node service account can pull images from `ecommerce-repo`
-   (typically grant it `roles/artifactregistry.reader` on the repository).
-5. Connect to the cluster as an administrator and create the application
-   namespace once:
+The GKE Autopilot cluster `ecommerce-learning`, Artifact Registry repository
+`ecommerce-repo`, and `ecommerce` namespace should exist in project
+`abdulproject-510307`, region `asia-south1`. The GKE node service account must
+have `roles/artifactregistry.reader` on the image repository.
 
-   ```bash
-   gcloud container clusters get-credentials ecommerce-learning \
-     --region=asia-south1 \
-     --project=abdulproject-510307
-   kubectl create namespace ecommerce
-   ```
+Configure GitHub Actions Workload Identity Federation for this repository and
+the `gke-deploy` and `gke-bootstrap` GitHub environments. Keep image publishing
+and cluster administration in separate environments: the existing
+`github-gke-deployer` account needs only `roles/artifactregistry.writer`, and
+its `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` secrets belong
+in `gke-deploy`. Do not use a long-lived service-account key.
+Allow GitHub Actions to write repository contents, and ensure branch protection
+permits its bot to commit the generated dev image overrides to `main`.
 
-6. Push a change to one of the workflow's watched paths on `main`, or run the
-   workflow manually. A successful run means the images were pushed and Helm
-   reported the workloads ready.
+The existing Workload Identity provider condition currently allows only
+`gke-bootstrap`. Update it to allow both protected deployment environments:
 
-The deployment uses internal `ClusterIP` services and does not create public
-ingress or TLS. For private access from Cloud Shell, run
-`kubectl port-forward service/colorful-market-frontend 8080:8080
---namespace=ecommerce`, then use **Web Preview → Preview on port 8080**.
+```bash
+PROJECT_ID=abdulproject-510307
+POOL_ID=github-actions
+PROVIDER_ID=github
 
-The manual image-promotion workflow below only records an image digest for the
-separate GitOps flow; it is not needed for this direct GitHub Actions deploy.
+gcloud iam workload-identity-pools providers update-oidc "$PROVIDER_ID" \
+  --project="$PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool="$POOL_ID" \
+  --attribute-condition="assertion.repository == 'techabdulrahman/microservice-' && (assertion.environment == 'gke-bootstrap' || assertion.environment == 'gke-deploy')"
+```
+
+The Argo CD bootstrap workflow needs elevated cluster permissions to install
+Argo CD's cluster-scoped resources. Use a separate bootstrap account rather
+than elevating the image publisher:
+
+```bash
+PROJECT_ID=abdulproject-510307
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+BOOTSTRAP_SA=github-gke-bootstrap
+BOOTSTRAP_EMAIL="${BOOTSTRAP_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
+POOL_ID=github-actions
+
+gcloud iam service-accounts create "$BOOTSTRAP_SA" \
+  --project="$PROJECT_ID" \
+  --display-name="GitHub GKE bootstrap"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${BOOTSTRAP_EMAIL}" \
+  --role="roles/container.admin"
+gcloud iam service-accounts add-iam-policy-binding "$BOOTSTRAP_EMAIL" \
+  --project="$PROJECT_ID" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/techabdulrahman/microservice-"
+```
+
+In the `gke-bootstrap` GitHub environment, add
+`GCP_BOOTSTRAP_SERVICE_ACCOUNT` with value
+`github-gke-bootstrap@abdulproject-510307.iam.gserviceaccount.com` and the
+`GCP_WORKLOAD_IDENTITY_PROVIDER` secret. Also add
+`GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` to `gke-deploy`.
+Restrict access to `gke-bootstrap` and protect approvals. The `container.admin`
+role is powerful; remove its project binding after bootstrap if you do not
+need to rerun the bootstrap workflow.
+
+### Bootstrap and ongoing deployments
+
+1. Push the GitOps workflow and Argo CD manifests to `main`.
+2. Wait for **Build images and update GitOps manifests** to finish. It runs
+   tests, publishes images, and commits their digests to the four dev override
+   files. This must finish before the first Argo CD sync so the existing
+   deployment is not replaced with stale image references. The bootstrap
+   workflow checks that each file points to its expected image and fails
+   safely if this step has not finished.
+3. In **Actions → Install Argo CD on GKE → Run workflow**, select `main`.
+   It installs Argo CD, registers the restricted `colorful-market` project
+   and Application, then waits for the application to become Synced and
+   Healthy. The application adopts the existing `colorful-market` Helm
+   resources; after this, do not run `helm upgrade` for that release.
+4. For future changes, push to `main`. The build workflow updates image digests
+   in Git and Argo CD reconciles those changes to GKE. The manual
+   **Promote image to GKE** workflow also updates a dev image override that
+   Argo CD watches.
+
+The Argo CD server and app services are internal-only. For private storefront
+access from Cloud Shell, run:
+
+```bash
+kubectl port-forward service/colorful-market-frontend 8080:8080 \
+  --namespace=ecommerce
+```
+
+Then choose **Web Preview → Preview on port 8080**. If the GitHub repository is
+private, configure repository credentials in Argo CD before registering the
+Application; never commit a GitHub token to this repository.
 
 ### Manual Helm deployment (alternative)
+
+Use the following manual Helm procedure only before Argo CD takes ownership of
+the `colorful-market` release. Do not run `helm upgrade` for that release after
+the GitOps Application is synced.
 
 This uses Cloud Build to build the four container images, Artifact Registry to
 store them, and Helm to install the application. It does **not** create a
@@ -228,38 +286,6 @@ in Cloud Shell. Stop the port-forward with Ctrl+C. When you want to remove this
 demo release, use `helm uninstall colorful-market --namespace=ecommerce`; this
 does not delete the cluster or namespace.
 
-This first GKE path uses Helm directly to keep the learning steps visible. The
-Argo CD image-promotion workflow is separate and will not deploy this chart
-until an Argo CD Application is configured.
-
-### Install Argo CD with GitHub Actions
-
-The **Install Argo CD on GKE** workflow bootstraps Argo CD in the existing
-`ecommerce-learning` cluster; it does not create or modify the cluster itself.
-Before running it:
-
-1. Configure GitHub Actions Workload Identity Federation for this repository
-   and a dedicated Google service account. Restrict the provider to this
-   repository and the `gke-bootstrap` GitHub environment; do not use a
-   long-lived service-account key.
-2. Grant the service account only the GKE access needed to install a
-   cluster-scoped Helm release. Bootstrap requires cluster-admin-equivalent
-   permissions; restrict who can assume the account and approve runs.
-3. Create the GitHub environment named `gke-bootstrap` and add these
-   environment secrets:
-   - `GCP_WORKLOAD_IDENTITY_PROVIDER`: full Workload Identity Provider resource
-     name.
-   - `GCP_SERVICE_ACCOUNT`: service-account email used for impersonation.
-4. From the `main` branch, run **Actions → Install Argo CD on GKE → Run
-   workflow**. The workflow installs the pinned Argo CD Helm chart into the
-   `argocd` namespace. Re-running it upgrades/reconciles that Helm release.
-
-The Argo CD server is installed as an internal `ClusterIP` service; this
-workflow does not expose it publicly, configure SSO/repository credentials, or
-create Argo CD Projects and Applications. Use a private access method such as
-`kubectl port-forward` for initial administration, then configure authentication
-and GitOps Applications before relying on it for deployments.
-
 ### Deploy Grafana Alloy to Grafana Cloud
 
 The **Deploy Grafana Alloy to GKE** workflow installs Grafana Alloy as a
@@ -325,16 +351,9 @@ asia-south1-docker.pkg.dev/abdulproject-510307/REPOSITORY/IMAGE@sha256:<64 lower
 
 The workflow commits an image override to
 `environments/<environment>/<service>.yaml` using the chart's
-`services.<service>.image` value, so the file can be passed to Helm with `-f`. Configure GitHub environment
-protection rules for staging/production approvals as appropriate. No GCP
-credentials are granted to the workflow; Argo CD must already be configured to
-watch this repository and sync the corresponding chart.
-
-**Current limitation:** Dockerfiles exist, but the new demo images have not yet
-been built/published. A Helm chart exists, but Argo CD Applications are not
-configured. The workflow can record a desired image, but it will not create
-running workloads until images are published and Argo CD is configured. It does
-not create, recreate, or modify the GKE cluster.
+`services.<service>.image` value. The current Argo CD Application watches the
+`dev` environment only; staging and production need their own Application
+definitions and approval policies before those overrides deploy.
 
 ## Repository layout
 

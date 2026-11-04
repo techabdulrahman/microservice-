@@ -1,4 +1,4 @@
-name: Build and deploy application to GKE
+name: Build images and update GitOps manifests
 
 on:
   push:
@@ -13,10 +13,11 @@ on:
       - "tests/**"
       - "requirements-dev.txt"
       - ".github/workflows/deploy-application-gke.yml"
+      - ".github/workflows/deploy-gke.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -26,15 +27,13 @@ concurrency:
 env:
   PROJECT_ID: abdulproject-510307
   REGION: asia-south1
-  CLUSTER_NAME: ecommerce-learning
-  NAMESPACE: ecommerce
   REGISTRY: asia-south1-docker.pkg.dev/abdulproject-510307/ecommerce-repo
 
 jobs:
   build-and-deploy:
-    name: Test, publish images, and deploy Helm release
+    name: Test, publish images, and commit desired versions
     runs-on: ubuntu-latest
-    environment: gke-bootstrap
+    environment: gke-deploy
     steps:
       - name: Require the main branch
         run: |
@@ -62,16 +61,15 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Set up gcloud and the GKE authentication plugin
+      - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
-          install_components: gke-gcloud-auth-plugin
 
       - name: Authenticate Docker to Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-      - name: Build and push immutable application images
+      - name: Build and push application images
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
@@ -89,40 +87,56 @@ jobs:
           docker build --tag "${REGISTRY}/order-service:${IMAGE_TAG}" services/order-service
           docker push "${REGISTRY}/order-service:${IMAGE_TAG}"
 
-      - name: Get credentials for the existing GKE cluster
-        uses: google-github-actions/get-gke-credentials@v2
-        with:
-          cluster_name: ${{ env.CLUSTER_NAME }}
-          location: ${{ env.REGION }}
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
-      - name: Deploy application with Helm
+      - name: Record published image digests in Git
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          helm upgrade --install colorful-market ./helm/ecommerce-demo \
-            --namespace "$NAMESPACE" \
-            --wait \
-            --timeout 10m \
-            --set-string "services.frontend.image=${REGISTRY}/colorful-frontend:${IMAGE_TAG}" \
-            --set-string "services.api-gateway.image=${REGISTRY}/api-gateway:${IMAGE_TAG}" \
-            --set-string "services.product-service.image=${REGISTRY}/product-service:${IMAGE_TAG}" \
-            --set-string "services.order-service.image=${REGISTRY}/order-service:${IMAGE_TAG}"
+          set -euo pipefail
 
-          kubectl get deployments,services,pods --namespace "$NAMESPACE"
+          declare -A images=(
+            [frontend]=colorful-frontend
+            [api-gateway]=api-gateway
+            [product-service]=product-service
+            [order-service]=order-service
+          )
 
-      - name: Report deployment
+          for service in frontend api-gateway product-service order-service; do
+            image_name="${images[$service]}"
+            digest="$(gcloud artifacts docker images describe \
+              "${REGISTRY}/${image_name}:${IMAGE_TAG}" \
+              --project="$PROJECT_ID" \
+              --format='value(image_summary.digest)')"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Could not resolve an immutable image digest for ${service}."
+              exit 1
+            fi
+
+            printf 'services:\n  %s:\n    image: "%s/%s@%s"\n' \
+              "$service" "$REGISTRY" "$image_name" "$digest" \
+              > "environments/dev/${service}.yaml"
+          done
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add environments/dev/frontend.yaml \
+            environments/dev/api-gateway.yaml \
+            environments/dev/product-service.yaml \
+            environments/dev/order-service.yaml
+          if git diff --cached --quiet; then
+            echo "Image digests are already recorded."
+            exit 0
+          fi
+          git commit -m "Update dev images to ${IMAGE_TAG}"
+          git push origin "HEAD:main"
+
+      - name: Report GitOps handoff
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           {
-            echo "### Application deployed to GKE"
+            echo "### Image build complete; Argo CD will sync Git"
             echo ""
-            echo "- Cluster: \`${CLUSTER_NAME}\` (\`${REGION}\`)"
-            echo "- Namespace: \`${NAMESPACE}\`"
-            echo "- Image tag: \`${IMAGE_TAG}\`"
-            echo "- Services are internal; use a private access method to open the storefront."
+            echo "- Source commit: \`${IMAGE_TAG}\`"
+            echo "- Immutable image digests were committed under \`environments/dev/\`."
+            echo "- Argo CD applies the desired state from the main branch."
           } >> "$GITHUB_STEP_SUMMARY"

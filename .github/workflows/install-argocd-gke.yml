@@ -30,11 +30,43 @@ jobs:
             exit 1
           fi
 
+      - name: Check out GitOps configuration
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Require published image digests before GitOps bootstrap
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          registry = "asia-south1-docker.pkg.dev/abdulproject-510307/ecommerce-repo"
+          images = {
+              "frontend": "colorful-frontend",
+              "api-gateway": "api-gateway",
+              "product-service": "product-service",
+              "order-service": "order-service",
+          }
+          for service, image in images.items():
+              path = Path("environments/dev") / f"{service}.yaml"
+              expected = (
+                  rf'^services:\s+{re.escape(service)}:\s+image:\s+"'
+                  rf'{re.escape(registry)}/{re.escape(image)}@sha256:[0-9a-f]{{64}}"'
+              )
+              if re.search(expected, path.read_text(encoding="utf-8"), re.MULTILINE) is None:
+                  raise SystemExit(
+                      f"{path} does not contain a published digest for "
+                      f"{registry}/{image}. Run the image build workflow first."
+                  )
+          print("All dev service overrides contain the expected immutable image digests.")
+          PY
+
       - name: Authenticate to Google Cloud with Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_BOOTSTRAP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud and the GKE authentication plugin
         uses: google-github-actions/setup-gcloud@v2
@@ -64,14 +96,28 @@ jobs:
             --wait \
             --timeout 10m
 
-      - name: Report deployment status
+      - name: Register the GitOps project and application
         run: |
-          kubectl get deployments,services,pods --namespace "$ARGOCD_NAMESPACE"
+          kubectl apply -f argocd/projects/colorful-market.yaml
+          kubectl apply -f argocd/applications/colorful-market.yaml
+          kubectl wait \
+            --for=jsonpath='{.status.sync.status}'=Synced \
+            application/colorful-market \
+            --namespace "$ARGOCD_NAMESPACE" \
+            --timeout=10m
+          kubectl wait \
+            --for=jsonpath='{.status.health.status}'=Healthy \
+            application/colorful-market \
+            --namespace "$ARGOCD_NAMESPACE" \
+            --timeout=10m
+          kubectl get application colorful-market --namespace "$ARGOCD_NAMESPACE"
+          kubectl get deployments,services,pods --namespace ecommerce
           {
-            echo "### Argo CD installed"
+            echo "### Argo CD installed and GitOps application synced"
             echo ""
             echo "- Cluster: \`${CLUSTER_NAME}\` (\`${CLUSTER_LOCATION}\`)"
             echo "- Namespace: \`${ARGOCD_NAMESPACE}\`"
             echo "- Argo CD server is internal-only (\`ClusterIP\`)."
-            echo "- This workflow does not create Argo CD Applications or expose a public endpoint."
+            echo "- Application: \`colorful-market\` from the main branch."
+            echo "- Workloads are managed by Argo CD; GitHub Actions no longer deploys them directly."
           } >> "$GITHUB_STEP_SUMMARY"
