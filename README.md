@@ -75,7 +75,55 @@ Run the unit tests with:
 python -m pytest tests
 ```
 
-## Optional: deploy the private demo to your existing GKE cluster
+## Deploy the private demo to GKE
+
+The **Build and deploy application to GKE** GitHub Actions workflow runs
+automatically when changes to the application, Helm chart, tests, or workflow
+are pushed to `main`. It runs the tests, builds and publishes the four images
+to Artifact Registry using the commit SHA as the image tag, and upgrades the
+Helm release in the existing `ecommerce` namespace. It can also be started
+manually from **Actions → Build and deploy application to GKE → Run workflow**
+on `main`.
+
+Before using it:
+
+1. Make sure the GKE cluster `ecommerce-learning` and the Artifact Registry
+   repository `ecommerce-repo` exist in project `abdulproject-510307`, region
+   `asia-south1`.
+2. Configure Workload Identity Federation for this GitHub repository and a
+   dedicated Google service account. Restrict the identity provider to this
+   repository and the `gke-bootstrap` GitHub environment. Add the environment
+   secrets `GCP_WORKLOAD_IDENTITY_PROVIDER` (full provider resource name) and
+   `GCP_SERVICE_ACCOUNT` (service-account email). Do not use a long-lived
+   service-account key.
+3. Grant that service account `roles/artifactregistry.writer` and
+   `roles/container.developer` in the project. It needs permission to push
+   images and deploy namespaced workloads.
+4. Ensure the GKE node service account can pull images from `ecommerce-repo`
+   (typically grant it `roles/artifactregistry.reader` on the repository).
+5. Connect to the cluster as an administrator and create the application
+   namespace once:
+
+   ```bash
+   gcloud container clusters get-credentials ecommerce-learning \
+     --region=asia-south1 \
+     --project=abdulproject-510307
+   kubectl create namespace ecommerce
+   ```
+
+6. Push a change to one of the workflow's watched paths on `main`, or run the
+   workflow manually. A successful run means the images were pushed and Helm
+   reported the workloads ready.
+
+The deployment uses internal `ClusterIP` services and does not create public
+ingress or TLS. For private access from Cloud Shell, run
+`kubectl port-forward service/colorful-market-frontend 8080:8080
+--namespace=ecommerce`, then use **Web Preview → Preview on port 8080**.
+
+The manual image-promotion workflow below only records an image digest for the
+separate GitOps flow; it is not needed for this direct GitHub Actions deploy.
+
+### Manual Helm deployment (alternative)
 
 This uses Cloud Build to build the four container images, Artifact Registry to
 store them, and Helm to install the application. It does **not** create a
