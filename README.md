@@ -83,6 +83,36 @@ watches the `main` branch and synchronizes the Helm chart from that Git state
 to the existing GKE cluster. GitHub Actions does not apply the application
 Helm release directly.
 
+### Recreate the GKE cluster with Terraform
+
+The Terraform configuration in `infra/terraform/` creates the regional
+Autopilot cluster and ensures the required GKE APIs are enabled. It does not
+manage or delete the existing Artifact Registry repository, container images,
+GitHub Workload Identity Federation, service accounts, or IAM bindings.
+
+Run these commands from the repository root in Cloud Shell after the old
+`ecommerce-learning` cluster has been deleted:
+
+```bash
+gcloud config set project abdulproject-510307
+terraform -chdir=infra/terraform init
+terraform -chdir=infra/terraform plan
+terraform -chdir=infra/terraform apply
+terraform -chdir=infra/terraform output -raw get_credentials_command
+```
+
+Run the printed `gcloud container clusters get-credentials ...` command, then
+verify the cluster with `kubectl get nodes`. Keep `infra/terraform/terraform.tfstate`
+in the same working directory for future Terraform runs; it is intentionally
+ignored by Git and must not be deleted if Terraform will manage this cluster.
+Do not run `terraform destroy` unless you intend to delete the GKE cluster.
+
+After the cluster is ready, run **Actions → Install Argo CD on GKE** from
+`main`. That workflow installs Argo CD and syncs the application from the
+existing image digests. Run **Actions → Deploy Grafana Alloy to GKE** to
+reinstall telemetry collection. The `gke-bootstrap` GitHub environment,
+Grafana secrets, and IAM/WIF configuration must remain in place.
+
 ### One-time prerequisites
 
 The GKE Autopilot cluster `ecommerce-learning`, Artifact Registry repository
