@@ -54,6 +54,21 @@ jobs:
           location: ${{ env.CLUSTER_LOCATION }}
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Diagnose GKE identity and ClusterRole permissions
+        run: |
+          echo "Active Google identity:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+
+          echo "Kubernetes ClusterRole permissions:"
+          patch_allowed="$(kubectl auth can-i patch clusterroles || true)"
+          create_allowed="$(kubectl auth can-i create clusterroles || true)"
+          echo "patch clusterroles: ${patch_allowed}"
+          echo "create clusterroles: ${create_allowed}"
+          if [[ "$patch_allowed" != "yes" || "$create_allowed" != "yes" ]]; then
+            echo "::error::The authenticated identity cannot manage cluster-scoped ClusterRoles. Check its GKE IAM and Kubernetes RBAC permissions."
+            exit 1
+          fi
+
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
