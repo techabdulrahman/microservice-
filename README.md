@@ -184,6 +184,64 @@ This first GKE path uses Helm directly to keep the learning steps visible. The
 Argo CD image-promotion workflow is separate and will not deploy this chart
 until an Argo CD Application is configured.
 
+### Install Argo CD with GitHub Actions
+
+The **Install Argo CD on GKE** workflow bootstraps Argo CD in the existing
+`ecommerce-learning` cluster; it does not create or modify the cluster itself.
+Before running it:
+
+1. Configure GitHub Actions Workload Identity Federation for this repository
+   and a dedicated Google service account. Restrict the provider to this
+   repository and the `gke-bootstrap` GitHub environment; do not use a
+   long-lived service-account key.
+2. Grant the service account only the GKE access needed to install a
+   cluster-scoped Helm release. Bootstrap requires cluster-admin-equivalent
+   permissions; restrict who can assume the account and approve runs.
+3. Create the GitHub environment named `gke-bootstrap` and add these
+   environment secrets:
+   - `GCP_WORKLOAD_IDENTITY_PROVIDER`: full Workload Identity Provider resource
+     name.
+   - `GCP_SERVICE_ACCOUNT`: service-account email used for impersonation.
+4. From the `main` branch, run **Actions → Install Argo CD on GKE → Run
+   workflow**. The workflow installs the pinned Argo CD Helm chart into the
+   `argocd` namespace. Re-running it upgrades/reconciles that Helm release.
+
+The Argo CD server is installed as an internal `ClusterIP` service; this
+workflow does not expose it publicly, configure SSO/repository credentials, or
+create Argo CD Projects and Applications. Use a private access method such as
+`kubectl port-forward` for initial administration, then configure authentication
+and GitOps Applications before relying on it for deployments.
+
+### Deploy Grafana Alloy to Grafana Cloud
+
+The **Deploy Grafana Alloy to GKE** workflow installs Grafana Alloy as a
+DaemonSet in the `monitoring` namespace of the existing GKE cluster. Alloy
+tails Kubernetes container logs through the Kubernetes API, selecting only
+pods on its own node to avoid duplicate ingestion, and forwards them to Grafana
+Cloud Loki. It scrapes Prometheus metrics only from pods annotated with
+`prometheus.io/scrape: "true"`; add the scrape port annotation and, when needed,
+`prometheus.io/path` to opt a pod in. The current demo services do not expose
+Prometheus metrics yet.
+
+Add these secrets to the `gke-bootstrap` GitHub environment, along with the two
+Workload Identity secrets described above:
+
+- `GRAFANA_CLOUD_LOKI_URL`, `GRAFANA_CLOUD_LOKI_USERNAME`, and
+  `GRAFANA_CLOUD_LOKI_PASSWORD` for a Grafana Cloud Logs/ Loki endpoint and
+  credentials.
+- `GRAFANA_CLOUD_PROMETHEUS_URL`, `GRAFANA_CLOUD_PROMETHEUS_USERNAME`, and
+  `GRAFANA_CLOUD_PROMETHEUS_PASSWORD` for the Grafana Cloud Prometheus remote
+  write endpoint and credentials.
+
+Use the full remote-write and Loki push URLs provided by Grafana Cloud, and an
+access policy token with only the required logs-write and metrics-write scopes.
+The workflow creates or updates the `grafana-cloud` Kubernetes Secret from
+these GitHub environment secrets, then installs the pinned Grafana Alloy Helm
+chart using [monitoring/alloy/values.yaml](./monitoring/alloy/values.yaml).
+Secret values are not stored in the repository. The Google service account
+needs permission to manage the `monitoring` namespace and the chart's
+cluster-wide pod-discovery RBAC resources.
+
 ## Deployment target
 
 | Setting | Value |
@@ -225,8 +283,8 @@ credentials are granted to the workflow; Argo CD must already be configured to
 watch this repository and sync the corresponding chart.
 
 **Current limitation:** Dockerfiles exist, but the new demo images have not yet
-been built/published. This repository still needs Helm charts and Argo CD
-Applications. The workflow can record a desired image, but it will not create
+been built/published. A Helm chart exists, but Argo CD Applications are not
+configured. The workflow can record a desired image, but it will not create
 running workloads until images are published and Argo CD is configured. It does
 not create, recreate, or modify the GKE cluster.
 

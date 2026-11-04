@@ -1,0 +1,110 @@
+controller:
+  type: daemonset
+
+alloy:
+  configMap:
+    content: |
+      logging {
+        level = "info"
+      }
+
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods_on_this_node" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          action        = "keep"
+          regex         = sys.env("NODE_NAME")
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods_on_this_node.output
+        forward_to = [loki.write.grafana_cloud.receiver]
+      }
+
+      loki.write "grafana_cloud" {
+        endpoint {
+          url = sys.env("LOKI_WRITE_URL")
+
+          basic_auth {
+            username = sys.env("LOKI_USERNAME")
+            password = sys.env("LOKI_PASSWORD")
+          }
+        }
+      }
+
+      discovery.relabel "annotated_pods" {
+        targets = discovery.relabel.pods_on_this_node.output
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+          action        = "keep"
+          regex         = "true"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+          action        = "replace"
+          target_label  = "__metrics_path__"
+          regex         = "(.+)"
+        }
+
+        rule {
+          source_labels = [
+            "__address__",
+            "__meta_kubernetes_pod_annotation_prometheus_io_port",
+          ]
+          action       = "replace"
+          target_label = "__address__"
+          regex        = "([^:]+)(?::\\d+)?;(\\d+)"
+          replacement  = "$1:$2"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+      }
+
+      prometheus.scrape "annotated_pods" {
+        targets    = discovery.relabel.annotated_pods.output
+        forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+      }
+
+      prometheus.remote_write "grafana_cloud" {
+        endpoint {
+          url = sys.env("PROMETHEUS_REMOTE_WRITE_URL")
+
+          basic_auth {
+            username = sys.env("PROMETHEUS_USERNAME")
+            password = sys.env("PROMETHEUS_PASSWORD")
+          }
+        }
+      }
+
+  extraEnv:
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+  envFrom:
+    - secretRef:
+        name: grafana-cloud
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

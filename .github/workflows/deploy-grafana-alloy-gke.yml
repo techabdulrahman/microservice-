@@ -1,0 +1,138 @@
+name: Deploy Grafana Alloy to GKE
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-grafana-alloy-gke
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy the Grafana Alloy DaemonSet
+    runs-on: ubuntu-latest
+    environment: gke-bootstrap
+    env:
+      PROJECT_ID: abdulproject-510307
+      CLUSTER_NAME: ecommerce-learning
+      CLUSTER_LOCATION: asia-south1
+      MONITORING_NAMESPACE: monitoring
+      ALLOY_CHART_VERSION: 1.15.0
+    steps:
+      - name: Require the main branch
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from the main branch."
+            exit 1
+          fi
+
+      - name: Check out monitoring configuration
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud and the GKE authentication plugin
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Get credentials for the existing GKE cluster
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Create namespace and Grafana Cloud credentials
+        env:
+          PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
+          PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
+          PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
+          LOKI_WRITE_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
+          LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
+          LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
+        run: |
+          required=(
+            PROMETHEUS_REMOTE_WRITE_URL
+            PROMETHEUS_USERNAME
+            PROMETHEUS_PASSWORD
+            LOKI_WRITE_URL
+            LOKI_USERNAME
+            LOKI_PASSWORD
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The GitHub environment secret for ${name} is required."
+              exit 1
+            fi
+          done
+
+          kubectl create namespace "$MONITORING_NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          export MONITORING_NAMESPACE
+          python - <<'PY' | kubectl apply -f -
+          import base64
+          import json
+          import os
+
+          keys = (
+              "PROMETHEUS_REMOTE_WRITE_URL",
+              "PROMETHEUS_USERNAME",
+              "PROMETHEUS_PASSWORD",
+              "LOKI_WRITE_URL",
+              "LOKI_USERNAME",
+              "LOKI_PASSWORD",
+          )
+          secret = {
+              "apiVersion": "v1",
+              "kind": "Secret",
+              "metadata": {
+                  "name": "grafana-cloud",
+                  "namespace": os.environ["MONITORING_NAMESPACE"],
+              },
+              "type": "Opaque",
+              "data": {
+                  key: base64.b64encode(os.environ[key].encode()).decode()
+                  for key in keys
+              },
+          }
+          print(json.dumps(secret))
+          PY
+
+      - name: Install or upgrade Grafana Alloy
+        run: |
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update grafana
+          helm upgrade --install grafana-alloy grafana/alloy \
+            --namespace "$MONITORING_NAMESPACE" \
+            --version "$ALLOY_CHART_VERSION" \
+            --values monitoring/alloy/values.yaml \
+            --wait \
+            --timeout 10m
+
+      - name: Report deployment status
+        run: |
+          kubectl get daemonsets,pods --namespace "$MONITORING_NAMESPACE"
+          {
+            echo "### Grafana Alloy deployed"
+            echo ""
+            echo "- Cluster: \`${CLUSTER_NAME}\` (\`${CLUSTER_LOCATION}\`)"
+            echo "- Namespace: \`${MONITORING_NAMESPACE}\`"
+            echo "- Alloy runs as one DaemonSet pod per eligible node."
+            echo "- Kubernetes container logs are forwarded to Grafana Cloud Loki."
+            echo "- Prometheus scraping is limited to pods opting in with scrape annotations."
+          } >> "$GITHUB_STEP_SUMMARY"

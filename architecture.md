@@ -167,7 +167,10 @@ flowchart LR
   image versions through reviewed Git changes; use Argo CD history and Git
   reverts for controlled rollback.
 - Use Grafana Cloud rather than deploying a Grafana server in the cluster.
-  Collect Prometheus metrics, Loki-compatible logs, and OpenTelemetry traces.
+  Grafana Alloy is deployed as a DaemonSet to forward Kubernetes container logs
+  to Grafana Cloud Loki and scrape metrics from explicitly annotated pods to
+  Grafana Cloud Prometheus. Application metrics and OpenTelemetry traces still
+  require instrumentation/configuration before they will be available.
   Dashboards and alerts cover application health, service latency/errors,
   Kubernetes health, database performance, and deployment availability.
 - Kubernetes workloads use non-root users, read-only filesystems where
