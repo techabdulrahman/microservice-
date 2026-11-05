@@ -16,6 +16,7 @@ provider "google" {
 
 resource "google_project_service" "required" {
   for_each = toset([
+    "artifactregistry.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
   ])
@@ -23,6 +24,24 @@ resource "google_project_service" "required" {
   project            = var.project_id
   service            = each.value
   disable_on_destroy = false
+}
+
+resource "google_artifact_registry_repository" "application_images" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "ecommerce-repo"
+  description   = "E-commerce application images"
+  format        = "DOCKER"
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_artifact_registry_repository_iam_member" "image_publisher" {
+  project    = google_artifact_registry_repository.application_images.project
+  location   = google_artifact_registry_repository.application_images.location
+  repository = google_artifact_registry_repository.application_images.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:github-gke-deployer@${var.project_id}.iam.gserviceaccount.com"
 }
 
 resource "google_container_cluster" "autopilot" {

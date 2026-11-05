@@ -86,9 +86,11 @@ Helm release directly.
 ### Recreate the GKE cluster with Terraform
 
 The Terraform configuration in `infra/terraform/` creates the regional
-Autopilot cluster and ensures the required GKE APIs are enabled. It does not
-manage or delete the existing Artifact Registry repository, container images,
-GitHub Workload Identity Federation, service accounts, or IAM bindings.
+Autopilot cluster, enables the required Google APIs, creates the
+`ecommerce-repo` Artifact Registry Docker repository, and grants
+`roles/artifactregistry.writer` on that repository to
+`github-gke-deployer`. It does not manage container images, GitHub Workload
+Identity Federation, or service account creation.
 
 Run these commands from the repository root in Cloud Shell after the old
 `ecommerce-learning` cluster has been deleted:
