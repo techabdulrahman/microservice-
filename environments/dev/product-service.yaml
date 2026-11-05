@@ -1,3 +1,3 @@
 services:
   product-service:
-    image: "asia-south1-docker.pkg.dev/abdulproject-510307/ecommerce-repo/product-service@sha256:ffc9bb04950a456540823d50495c3bfe66158d4a9e7a6e0e66bc4cbd17b446f4"
+    image: "asia-south1-docker.pkg.dev/abdulproject-510307/ecommerce-repo/product-service@sha256:df844ed0f2a1360a9978e5da125a688665f8e7cb5476a6865e8a5e9758730a36"
