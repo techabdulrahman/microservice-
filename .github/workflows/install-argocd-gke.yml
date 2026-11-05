@@ -98,6 +98,7 @@ jobs:
 
       - name: Register the GitOps project and application
         run: |
+          kubectl create namespace ecommerce --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f argocd/projects/colorful-market.yaml
           kubectl apply -f argocd/applications/colorful-market.yaml
           kubectl wait \
